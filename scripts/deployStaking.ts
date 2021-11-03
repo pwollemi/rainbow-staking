@@ -14,7 +14,6 @@ import {
 async function main() {
   const totalSupply = getBigNumber("100000000");
   const totalRewardAmount = getBigNumber("2500000");
-  const startTime = duration.years(1).add(await getLatestBlockTimestamp());
   const rewardPerSecond = totalRewardAmount.div(duration.days(90));
 
   const lpToken = <CustomToken>(
@@ -32,8 +31,7 @@ async function main() {
     await deployProxy(
       "Staking",
       rewardToken.address,
-      lpToken.address,
-      startTime
+      lpToken.address
     )
   );
 

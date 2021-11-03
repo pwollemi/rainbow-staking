@@ -53,8 +53,6 @@ contract Staking is Initializable, OwnableUpgradeable {
 
     event LogUpdatePool(uint256 lastRewardTime, uint256 lpSupply, uint256 accRewardPerShare);
     event LogRewardPerSecond(uint256 rewardPerSecond);
-    event LogStakingInfo(uint256 startTime, uint256 stakingPeriod);
-    event LogEarlyWithdrawal(uint256 earlyWithdrawal);
 
     /**
      * @param _reward The reward token contract address.
@@ -113,12 +111,6 @@ contract Staking is Initializable, OwnableUpgradeable {
     /**
      * @notice Update reward variables.
      * @dev Updates accRewardPerShare and lastRewardTime.
-     *  This can be called in these timings.
-     *  1. before startTime: lastRewardTime is startTime so no update
-     *  2. staking in progress: it should work fine
-     *  3. staking is ended
-     *     - new staking params not set: it should work fine
-     *     - new staking params are set: lastRewardTime is startTime and the reward is already calculated
      */
     function updatePool() public {
         if (block.timestamp > lastRewardTime) {
