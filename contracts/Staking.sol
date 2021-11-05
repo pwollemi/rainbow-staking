@@ -46,6 +46,12 @@ contract Staking is Initializable, OwnableUpgradeable {
     /// @notice Info of each user that stakes LP tokens.
     mapping(address => UserInfo) public userInfo;
 
+    /// @notice Duration for unstake/claim penalty
+    uint256 public earlyWithdrawal;
+
+    /// @notice Penalty rate with 2 dp (e.g. 1000 = 10%)
+    uint256 public penaltyRate;
+
     event Deposit(address indexed user, uint256 amount, address indexed to);
     event Withdraw(address indexed user, uint256 amount, address indexed to);
     event EmergencyWithdraw(address indexed user, uint256 amount, address indexed to);
@@ -53,6 +59,7 @@ contract Staking is Initializable, OwnableUpgradeable {
 
     event LogUpdatePool(uint256 lastRewardTime, uint256 lpSupply, uint256 accRewardPerShare);
     event LogRewardPerSecond(uint256 rewardPerSecond);
+    event LogPenaltyParams(uint256 earlyWithdrawal, uint256 penaltyRate);
 
     /**
      * @param _reward The reward token contract address.
@@ -71,6 +78,20 @@ contract Staking is Initializable, OwnableUpgradeable {
         lpToken = _lpToken;
         accRewardPerShare = 0;
         lastRewardTime = block.timestamp;
+
+        earlyWithdrawal = 30 days;
+        penaltyRate = 0;
+    }
+
+    /**
+     * @notice Set the penalty information
+     * @param _earlyWithdrawal The new earlyWithdrawal
+     * @param _penaltyRate The new penaltyRate
+     */
+    function setPenaltyInfo(uint256 _earlyWithdrawal, uint256 _penaltyRate) external onlyOwner {
+        earlyWithdrawal = _earlyWithdrawal;
+        penaltyRate = _penaltyRate;
+        emit LogPenaltyParams(_earlyWithdrawal, _penaltyRate);
     }
 
     /**
@@ -169,7 +190,14 @@ contract Staking is Initializable, OwnableUpgradeable {
         emit Harvest(msg.sender, _pendingReward);
 
         // Interactions
-        rewardToken.safeTransfer(to, _pendingReward);
+        if (isEarlyWithdrawal(user.lastDepositedAt)) {
+            uint256 penaltyAmount = _pendingReward * penaltyRate / 10000;
+            rewardToken.safeTransfer(to, _pendingReward - penaltyAmount);
+            rewardToken.safeTransfer(address(0xdead), penaltyAmount);
+        } else {
+            rewardToken.safeTransfer(to, _pendingReward);
+        }
+
         lpToken.safeTransfer(to, amount);
     }
 
@@ -192,7 +220,13 @@ contract Staking is Initializable, OwnableUpgradeable {
 
         // Interactions
         if (_pendingReward != 0) {
-            rewardToken.safeTransfer(to, _pendingReward);
+            if (isEarlyWithdrawal(user.lastDepositedAt)) {
+                uint256 penaltyAmount = _pendingReward * penaltyRate / 10000;
+                rewardToken.safeTransfer(to, _pendingReward - penaltyAmount);
+                rewardToken.safeTransfer(address(0xdead), penaltyAmount);
+            } else {
+                rewardToken.safeTransfer(to, _pendingReward);
+            }
         }
     }
 
@@ -226,6 +260,14 @@ contract Staking is Initializable, OwnableUpgradeable {
      */
     function withdrawReward(uint256 amount) external onlyOwner {
         rewardToken.safeTransfer(msg.sender, amount);
+    }
+
+    /**
+     * @notice check if user in penalty period
+     * @return isEarly
+     */
+    function isEarlyWithdrawal(uint256 lastDepositedTime) internal view returns (bool isEarly) {
+        isEarly = block.timestamp <= lastDepositedTime + earlyWithdrawal;
     }
 
     function renounceOwnership() public override onlyOwner {

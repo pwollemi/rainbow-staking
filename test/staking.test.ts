@@ -111,6 +111,20 @@ describe("Staking Pool", () => {
     });
   });
 
+  describe("Set penalty info", () => {
+    const newPenaltyPeriod = duration.days(20);
+    const newPenaltyRate = 1000;
+
+    it("Only owner can do these operation", async () => {
+      await expect(staking.connect(bob).setPenaltyInfo(newPenaltyPeriod, newPenaltyRate)).to.be.revertedWith("Ownable: caller is not the owner");
+    });
+
+    it("It correctly updates information", async () => {
+      await staking.setPenaltyInfo(newPenaltyPeriod, newPenaltyRate);
+      expect(await staking.earlyWithdrawal()).to.be.equal(newPenaltyPeriod);
+      expect(await staking.penaltyRate()).to.be.equal(newPenaltyRate);
+    });
+  });
 
   describe("Set Reward per second", () => {
     const newRewardPerSecond = 100;
@@ -196,6 +210,25 @@ describe("Staking Pool", () => {
 
       expect(await rewardToken.balanceOf(alice.address)).to.be.equal(
         expectedReward
+      );
+      expect((await staking.userInfo(alice.address)).rewardDebt).to.be.equal(
+        expectedReward
+      );
+      expect(await staking.pendingReward(alice.address)).to.be.equal(0);
+    });
+
+    it("Penalty Applied", async () => {
+      await staking.setPenaltyInfo(duration.days(20), 1000);
+
+      const period = duration.days(10).toNumber();
+      const expectedReward = rewardPerSecond.mul(period);
+
+      await staking.deposit(getBigNumber(1), alice.address);
+      await advanceTime(period);
+      await staking.connect(alice).harvest(alice.address);
+
+      expect(await rewardToken.balanceOf(alice.address)).to.be.equal(
+        expectedReward.mul(9).div(10)
       );
       expect((await staking.userInfo(alice.address)).rewardDebt).to.be.equal(
         expectedReward
