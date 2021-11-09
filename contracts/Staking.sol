@@ -17,11 +17,11 @@ contract Staking is Initializable, OwnableUpgradeable {
     using SafeCastUpgradeable for uint256;
 
     /// @notice Info of each user.
-    /// `amount` LP token amount the user has provided.
+    /// `share` user's share of the staking pool
     /// `rewardDebt` The amount of reward entitled to the user.
     /// `lastDepositedAt` The timestamp of the last deposit.
     struct UserInfo {
-        uint256 amount;
+        uint256 share;
         int256 rewardDebt;
         uint256 lastDepositedAt;
     }
@@ -37,7 +37,10 @@ contract Staking is Initializable, OwnableUpgradeable {
     /// @notice Amount of reward token allocated per second.
     uint256 public rewardPerSecond;
 
-    /// @notice reward amount allocated per LP token.
+    /// @notice Total shares amount
+    uint256 public totalShares;
+
+    /// @notice reward amount allocated per share.
     uint256 public accRewardPerShare;
 
     /// @notice Last time that the reward is calculated.
@@ -52,9 +55,9 @@ contract Staking is Initializable, OwnableUpgradeable {
     /// @notice Penalty rate with 2 dp (e.g. 1000 = 10%)
     uint256 public penaltyRate;
 
-    event Deposit(address indexed user, uint256 amount, address indexed to);
-    event Withdraw(address indexed user, uint256 amount, address indexed to);
-    event EmergencyWithdraw(address indexed user, uint256 amount, address indexed to);
+    event Deposit(address indexed user, uint256 amount, uint256 share, address indexed to);
+    event Withdraw(address indexed user, uint256 amount, uint256 share, address indexed to);
+    event EmergencyWithdraw(address indexed user, uint256 amount, uint256 share, address indexed to);
     event Harvest(address indexed user, uint256 amount);
 
     event LogUpdatePool(uint256 lastRewardTime, uint256 lpSupply, uint256 accRewardPerShare);
@@ -106,26 +109,38 @@ contract Staking is Initializable, OwnableUpgradeable {
     }
 
     /**
+     * @notice Returns the stake info of a specifc user.
+     * @dev Calculates stakeAmount from the share
+     * @param _user Address of the user
+     * @return share of the user
+     * @return stakeAmount of the user
+     */
+    function getStakeInfo(address _user) external view returns (uint256 share, uint256 stakeAmount) {
+        UserInfo memory user = userInfo[_user];
+        share = user.share;
+        stakeAmount =  totalShares > 0 ? lpToken.balanceOf(address(this)) * share / totalShares : 0;
+    }
+
+    /**
      * @notice View function to see pending reward on frontend.
      * @dev It doens't update accRewardPerShare, it's just a view function.
      *
-     *  pending reward = (user.amount * pool.accRewardPerShare) - user.rewardDebt
+     *  pending reward = (user.share * pool.accRewardPerShare) - user.rewardDebt
      *
      * @param _user Address of user.
      * @return pending reward for a given user.
      */
     function pendingReward(address _user) external view returns (uint256 pending) {
-        UserInfo storage user = userInfo[_user];
-        uint256 lpSupply = lpToken.balanceOf(address(this));
+        UserInfo memory user = userInfo[_user];
         uint256 accRewardPerShare_ = accRewardPerShare;
 
-        if (block.timestamp > lastRewardTime && lpSupply != 0) {
+        if (block.timestamp > lastRewardTime && totalShares != 0) {
             uint256 newReward = (block.timestamp - lastRewardTime) * rewardPerSecond;
             accRewardPerShare_ =
                 accRewardPerShare_ +
-                ((newReward * ACC_REWARD_PRECISION) / lpSupply);
+                ((newReward * ACC_REWARD_PRECISION) / totalShares);
         }
-        pending = (((user.amount * accRewardPerShare_) / ACC_REWARD_PRECISION).toInt256() -
+        pending = (((user.share * accRewardPerShare_) / ACC_REWARD_PRECISION).toInt256() -
             user.rewardDebt).toUint256();
     }
 
@@ -157,13 +172,21 @@ contract Staking is Initializable, OwnableUpgradeable {
         UserInfo storage user = userInfo[to];
 
         // Effects
+        uint256 share;
+        if (totalShares > 0) {
+            share = amount * totalShares / lpToken.balanceOf(address(this));
+        } else {
+            share = amount;
+        }
+        totalShares = totalShares + share;
+
+        user.share = user.share + share;
         user.lastDepositedAt = block.timestamp;
-        user.amount = user.amount + amount;
         user.rewardDebt =
             user.rewardDebt +
-            ((amount * accRewardPerShare) / ACC_REWARD_PRECISION).toInt256();
+            ((share * accRewardPerShare) / ACC_REWARD_PRECISION).toInt256();
 
-        emit Deposit(msg.sender, amount, to);
+        emit Deposit(msg.sender, amount, share, to);
 
         lpToken.safeTransferFrom(msg.sender, address(this), amount);
     }
@@ -176,17 +199,24 @@ contract Staking is Initializable, OwnableUpgradeable {
     function withdraw(uint256 amount, address to) public {
         updatePool();
         UserInfo storage user = userInfo[msg.sender];
-        int256 accumulatedReward = ((user.amount * accRewardPerShare) / ACC_REWARD_PRECISION)
+        int256 accumulatedReward = ((user.share * accRewardPerShare) / ACC_REWARD_PRECISION)
             .toInt256();
         uint256 _pendingReward = (accumulatedReward - user.rewardDebt).toUint256();
+
+        uint256 lpSupply = lpToken.balanceOf(address(this));
+        uint256 shareFromAmount = lpSupply > 0 ? amount * totalShares / lpSupply : 0;
+        if (shareFromAmount > user.share) {
+            shareFromAmount = user.share;
+            amount = shareFromAmount * lpToken.balanceOf(address(this)) / totalShares;
+        }
 
         // Effects
         user.rewardDebt =
             accumulatedReward -
-            ((amount * accRewardPerShare) / ACC_REWARD_PRECISION).toInt256();
-        user.amount = user.amount - amount;
+            ((shareFromAmount * accRewardPerShare) / ACC_REWARD_PRECISION).toInt256();
+        user.share = user.share - shareFromAmount;
 
-        emit Withdraw(msg.sender, amount, to);
+        emit Withdraw(msg.sender, amount, shareFromAmount, to);
         emit Harvest(msg.sender, _pendingReward);
 
         // Interactions
@@ -209,7 +239,7 @@ contract Staking is Initializable, OwnableUpgradeable {
     function harvest(address to) public {
         updatePool();
         UserInfo storage user = userInfo[msg.sender];
-        int256 accumulatedReward = ((user.amount * accRewardPerShare) / ACC_REWARD_PRECISION)
+        int256 accumulatedReward = ((user.share * accRewardPerShare) / ACC_REWARD_PRECISION)
             .toInt256();
         uint256 _pendingReward = (accumulatedReward - user.rewardDebt).toUint256();
 
@@ -236,11 +266,12 @@ contract Staking is Initializable, OwnableUpgradeable {
      */
     function emergencyWithdraw(address to) public {
         UserInfo storage user = userInfo[msg.sender];
-        uint256 amount = user.amount;
-        user.amount = 0;
+        uint256 share = user.share;
+        uint256 amount = totalShares > 0 ? share * lpToken.balanceOf(address(this)) / totalShares : 0;
+        user.share = 0;
         user.rewardDebt = 0;
 
-        emit EmergencyWithdraw(msg.sender, amount, to);
+        emit EmergencyWithdraw(msg.sender, amount, share, to);
 
         // Note: transfer can fail or succeed if `amount` is zero.
         lpToken.safeTransfer(to, amount);
