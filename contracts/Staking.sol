@@ -215,6 +215,7 @@ contract Staking is Initializable, OwnableUpgradeable {
             accumulatedReward -
             ((shareFromAmount * accRewardPerShare) / ACC_REWARD_PRECISION).toInt256();
         user.share = user.share - shareFromAmount;
+        totalShares = totalShares - shareFromAmount;
 
         emit Withdraw(msg.sender, amount, shareFromAmount, to);
         emit Harvest(msg.sender, _pendingReward);
