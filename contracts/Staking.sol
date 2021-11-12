@@ -269,6 +269,7 @@ contract Staking is Initializable, OwnableUpgradeable {
         UserInfo storage user = userInfo[msg.sender];
         uint256 share = user.share;
         uint256 amount = totalShares > 0 ? share * lpToken.balanceOf(address(this)) / totalShares : 0;
+        totalShares = totalShares - share;
         user.share = 0;
         user.rewardDebt = 0;
 

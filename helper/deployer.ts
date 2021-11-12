@@ -1,6 +1,6 @@
 import hre, { ethers, upgrades } from "hardhat";
 
-declare type ContractName = "Staking" | "CustomToken";
+declare type ContractName = "Staking" | "CustomToken" | "RainbowToken";
 
 async function verifyContract(
   address: string,
