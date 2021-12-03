@@ -4,7 +4,7 @@ import { solidity } from "ethereum-waffle";
 import chai from "chai";
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/dist/src/signer-with-address";
 import { BigNumber } from "ethers";
-import { CustomToken, Staking } from "../typechain";
+import { CustomToken, RainbowToken, Staking } from "../typechain";
 import {
   getLatestBlockTimestamp,
   mineBlock,
@@ -19,70 +19,69 @@ chai.use(solidity);
 const { expect } = chai;
 
 describe("Staking Pool", () => {
-  const totalSupply = getBigNumber("100000000");
-  const totalAmount = getBigNumber("20000000");
-  const totalRewardAmount = getBigNumber("2500000");
-
+  let totalSupply: BigNumber;
+  let totalRewardAmount: BigNumber;
+  
   // to avoid complex calculation of decimals, we set an easy value
-  const rewardPerSecond = BigNumber.from("100000000000000000");
-
+  const rewardPerSecond = BigNumber.from("1000000000000");
+  
   let staking: Staking;
-  let lpToken: CustomToken;
+  let rainbow: RainbowToken;
   let rewardToken: CustomToken;
-
+  
   let deployer: SignerWithAddress;
   let bob: SignerWithAddress;
   let alice: SignerWithAddress;
+  let tom: SignerWithAddress;
+  let rewardTreasury: SignerWithAddress;
+
+  let rainbowSupply;
 
   before(async () => {
-    [deployer, bob, alice] = await ethers.getSigners();
+    [deployer, bob, alice, tom, rewardTreasury] = await ethers.getSigners();
   });
 
   beforeEach(async () => {
-    lpToken = <CustomToken>(
-      await deployContract(
-        "CustomToken",
-        "Reward-USDC QS LP token",
-        "REWARD-USDC",
-        totalSupply
-      )
+    rainbow = <RainbowToken>(
+      await deployContract("RainbowToken")
     );
-    rewardToken = <CustomToken>(
-      await deployContract("CustomToken", "Reward token", "REWARD", totalSupply)
-    );
+    // rewardToken = <CustomToken>(
+    //   await deployContract("CustomToken", "Reward token", "REWARD", totalSupply)
+    // );
+    rewardToken = rainbow;
     staking = <Staking>(
       await deployProxy(
         "Staking",
         rewardToken.address,
-        lpToken.address,
+        rainbow.address,
       )
     );
+    totalSupply = await rainbow.totalSupply();
+    totalRewardAmount = totalSupply.div(2);
 
     await staking.setRewardPerSecond(rewardPerSecond);
+    await staking.setRewardTreasury(deployer.address);
 
-    await rewardToken.transfer(staking.address, totalRewardAmount);
+    await rewardToken.transfer(rewardTreasury.address, totalRewardAmount);
     await rewardToken.approve(staking.address, ethers.constants.MaxUint256);
 
-    await lpToken.transfer(bob.address, totalAmount.div(5));
-    await lpToken.transfer(alice.address, totalAmount.div(5));
-
-    await lpToken.approve(staking.address, ethers.constants.MaxUint256);
-    await lpToken
-      .connect(bob)
-      .approve(staking.address, ethers.constants.MaxUint256);
-    await lpToken
-      .connect(alice)
-      .approve(staking.address, ethers.constants.MaxUint256);
+    rainbowSupply = await rainbow.totalSupply();
+    await rainbow.transfer(bob.address, rainbowSupply.div(5));
+    await rainbow.transfer(alice.address, rainbowSupply.div(5));
+    await rainbow.approve(staking.address, ethers.constants.MaxUint256);
+    await rainbow.connect(bob).approve(staking.address, ethers.constants.MaxUint256);
+    await rainbow.connect(alice).approve(staking.address, ethers.constants.MaxUint256);
+    await rainbow.excludeFromFee(staking.address);
+    await rainbow.excludeFromFee(alice.address);
   });
 
   describe("initialize", async () => {
     it("Validiation of initilize params", async () => {
-      const now = await getLatestBlockTimestamp();
       await expect(
         deployProxy(
           "Staking",
           ethers.constants.AddressZero,
-          lpToken.address,
+          rainbow.address,
         )
       ).to.be.revertedWith("initialize: reward token address cannot be zero");
       await expect(
@@ -142,40 +141,41 @@ describe("Staking Pool", () => {
   });
 
   describe("Deposit", () => {
-    it("Deposit 0 amount", async () => {
-      await expect(staking.deposit(getBigNumber(0), bob.address))
+    it("Deposit 1 amount", async () => {
+      await expect(staking.deposit(getBigNumber(1, 9), bob.address))
         .to.emit(staking, "Deposit")
-        .withArgs(deployer.address, 0, bob.address);
+        .withArgs(deployer.address, getBigNumber(1, 9), getBigNumber(1, 9), bob.address);
     });
 
     it("Staking amount increases", async () => {
-      const stakeAmount1 = ethers.utils.parseUnits("10", 18);
-      const stakeAmount2 = ethers.utils.parseUnits("4", 18);
+      const stakeAmount1 = getBigNumber("10", 9);
+      const stakeAmount2 = getBigNumber("4", 9);
 
       await staking.deposit(stakeAmount1, bob.address);
-
-      // user info
-      const userInfo1 = await staking.userInfo(bob.address);
-      expect(userInfo1.amount).to.be.equal(stakeAmount1);
+      console.log((await (rainbow.balanceOf(staking.address))).toString());
+      await rainbow.connect(alice).transfer(bob.address, getBigNumber("1", 9));
+      console.log((await (rainbow.balanceOf(staking.address))).toString());
+      // console.log((await staking.totalShares()).toString());
+      // console.log((await staking.userInfo(bob.address)).share.toString());
+      // expect((await staking.getStakeInfo(bob.address)).stakeAmount).to.be.equal(stakeAmount1);
 
       await staking.deposit(stakeAmount2, bob.address);
-
-      // user info
-      const userInfo2 = await staking.userInfo(bob.address);
-      expect(userInfo2.amount).to.be.equal(stakeAmount1.add(stakeAmount2));
+      console.log((await (rainbow.balanceOf(staking.address))).toString());
+      // console.log((await staking.totalShares()).toString());
+      // console.log((await staking.userInfo(bob.address)).share.toString());
+      // expect((await staking.getStakeInfo(bob.address)).stakeAmount).to.be.equal(stakeAmount1.add(stakeAmount2));
     });
   });
 
   describe("PendingReward", () => {
     it("Should be zero when lp supply is zero", async () => {
-      await staking.deposit(getBigNumber(0), alice.address);
       await advanceTime(86400);
       await staking.updatePool();
       expect(await staking.pendingReward(alice.address)).to.be.equal(0);
     });
 
     it("PendingRward should equal ExpectedReward", async () => {
-      await staking.deposit(getBigNumber(1), alice.address);
+      await staking.deposit(getBigNumber(1, 9), alice.address);
       await advanceTime(86400);
       await mineBlock();
       const expectedReward = rewardPerSecond.mul(86400);
@@ -187,13 +187,12 @@ describe("Staking Pool", () => {
 
   describe("Update Pool", () => {
     it("LogUpdatePool event is emitted", async () => {
-      await advanceTimeAndBlock(100);
-      await staking.deposit(getBigNumber(1), alice.address);
+      await staking.deposit(getBigNumber(1, 9), alice.address);
       await expect(staking.updatePool())
         .to.emit(staking, "LogUpdatePool")
         .withArgs(
           await staking.lastRewardTime(),
-          await lpToken.balanceOf(staking.address),
+          await rainbow.balanceOf(staking.address),
           await staking.accRewardPerShare()
         );
     });
@@ -204,11 +203,13 @@ describe("Staking Pool", () => {
       const period = duration.days(31).toNumber();
       const expectedReward = rewardPerSecond.mul(period);
 
-      await staking.deposit(getBigNumber(1), alice.address);
+      await staking.deposit(getBigNumber(1, 9), alice.address);
       await advanceTime(period);
+      const balance0 = await rewardToken.balanceOf(alice.address);
       await staking.connect(alice).harvest(alice.address);
+      const balance1 = await rewardToken.balanceOf(alice.address);
 
-      expect(await rewardToken.balanceOf(alice.address)).to.be.equal(
+      expect(balance1.sub(balance0)).to.be.equal(
         expectedReward
       );
       expect((await staking.userInfo(alice.address)).rewardDebt).to.be.equal(
@@ -223,11 +224,13 @@ describe("Staking Pool", () => {
       const period = duration.days(10).toNumber();
       const expectedReward = rewardPerSecond.mul(period);
 
-      await staking.deposit(getBigNumber(1), alice.address);
+      await staking.deposit(getBigNumber(1, 9), alice.address);
       await advanceTime(period);
+      const balance0 = await rewardToken.balanceOf(alice.address);
       await staking.connect(alice).harvest(alice.address);
+      const balance1 = await rewardToken.balanceOf(alice.address);
 
-      expect(await rewardToken.balanceOf(alice.address)).to.be.equal(
+      expect(balance1.sub(balance0)).to.be.equal(
         expectedReward.mul(9).div(10)
       );
       expect((await staking.userInfo(alice.address)).rewardDebt).to.be.equal(
@@ -243,41 +246,67 @@ describe("Staking Pool", () => {
 
   describe("Withdraw", () => {
     it("Should give back the correct amount of lp token and harvest rewards(withdraw whole amount)", async () => {
-      const depositAmount = getBigNumber(1);
+      const depositAmount = getBigNumber(1, 9);
       const period = duration.days(31).toNumber();
       const expectedReward = rewardPerSecond.mul(period);
 
       await staking.deposit(depositAmount, alice.address);
       await advanceTime(period);
-      const balance0 = await lpToken.balanceOf(alice.address);
+      const balance0 = await rainbow.balanceOf(alice.address);
       await staking.connect(alice).withdraw(depositAmount, alice.address);
-      const balance1 = await lpToken.balanceOf(alice.address);
+      const balance1 = await rainbow.balanceOf(alice.address);
 
-      expect(depositAmount).to.be.equal(balance1.sub(balance0));
-      expect(await rewardToken.balanceOf(alice.address)).to.be.equal(
-        expectedReward
-      );
+      expect(depositAmount.add(expectedReward)).to.be.equal(balance1.sub(balance0));
 
       // remainging reward should be zero
       expect(await staking.pendingReward(alice.address)).to.be.equal(0);
       // remaing debt should be zero
       expect((await staking.userInfo(alice.address)).rewardDebt).to.be.equal(0);
     });
-
-    it("Withraw 0", async () => {
-      await expect(staking.connect(alice).withdraw(0, bob.address))
-        .to.emit(staking, "Withdraw")
-        .withArgs(alice.address, 0, bob.address);
-    });
   });
 
   describe("EmergencyWithdraw", () => {
     it("Should emit event EmergencyWithdraw", async () => {
-      await staking.deposit(getBigNumber(1), bob.address);
+      await staking.deposit(getBigNumber(1, 9), bob.address);
       await expect(staking.connect(bob).emergencyWithdraw(bob.address))
         .to.emit(staking, "EmergencyWithdraw")
-        .withArgs(bob.address, getBigNumber(1), bob.address);
+        .withArgs(bob.address, getBigNumber(1, 9), getBigNumber(1, 9), bob.address);
     });
+  });
+
+  describe("Reward Treasury", () => {
+    it("setRewardTreasury - Security/Work", async () => {
+      await expect(staking.connect(bob).setRewardTreasury(rewardTreasury.address)).to.be.revertedWith("Ownable: caller is not the owner");
+      await staking.setRewardTreasury(rewardTreasury.address);
+      expect(await staking.rewardTreasury()).to.be.equal(rewardTreasury.address);
+    });
+
+    it("can only spend aproved amount", async () => {
+      await rewardToken.connect(rewardTreasury).approve(staking.address, 0);
+      await staking.setRewardTreasury(rewardTreasury.address);
+      const rewardInfo = await staking.availableReward();
+      expect(rewardInfo.rewardInTreasury).to.be.equal(await rewardToken.balanceOf(rewardTreasury.address));
+      expect(rewardInfo.rewardAllowedForThisPool).to.be.equal(0);
+      
+      await rewardToken.connect(rewardTreasury).approve(staking.address, totalRewardAmount);
+      expect(await (await staking.availableReward()).rewardAllowedForThisPool).to.be.equal(totalRewardAmount);      
+    });
+
+    // it("should fail if allowed amount is small", async () => {
+    //   await rewardToken.connect(rewardTreasury).approve(staking.address, 0);
+    //   await staking.setRewardTreasury(rewardTreasury.address);
+
+    //   await staking.deposit(getBigNumber(1, 9), alice.address)
+    //   await advanceTime(86400 * 40);
+    //   await expect(staking.connect(alice).harvest(alice.address)).to.be.reverted;
+
+    //   const rewardAmount = await staking.pendingReward(alice.address);
+    //   await rewardToken.connect(rewardTreasury).approve(staking.address, rewardAmount.sub(1));
+    //   await expect(staking.connect(alice).harvest(alice.address)).to.be.reverted;
+
+    //   await rewardToken.connect(rewardTreasury).approve(staking.address, totalRewardAmount);
+    //   await staking.connect(alice).harvest(alice.address);
+    // });
   });
 
   describe("Renoucne Ownership", () => {

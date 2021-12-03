@@ -46,6 +46,9 @@ contract Staking is Initializable, OwnableUpgradeable {
     /// @notice Last time that the reward is calculated.
     uint256 public lastRewardTime;
 
+    /// @notice Reward treasury
+    address public rewardTreasury;
+
     /// @notice Info of each user that stakes LP tokens.
     mapping(address => UserInfo) public userInfo;
 
@@ -63,6 +66,7 @@ contract Staking is Initializable, OwnableUpgradeable {
     event LogUpdatePool(uint256 lastRewardTime, uint256 lpSupply, uint256 accRewardPerShare);
     event LogRewardPerSecond(uint256 rewardPerSecond);
     event LogPenaltyParams(uint256 earlyWithdrawal, uint256 penaltyRate);
+    event LogRewardTreasury(address indexed wallet);
 
     /**
      * @param _reward The reward token contract address.
@@ -106,6 +110,32 @@ contract Staking is Initializable, OwnableUpgradeable {
         updatePool();
         rewardPerSecond = _rewardPerSecond;
         emit LogRewardPerSecond(_rewardPerSecond);
+    }
+
+    /**
+     * @notice set reward wallet
+     * @param _wallet address that contains the rewards
+     */
+    function setRewardTreasury(address _wallet) external onlyOwner {
+        rewardTreasury = _wallet;
+        emit LogRewardTreasury(_wallet);
+    }
+
+    /**
+     * @notice return available reward amount
+     * @return rewardInTreasury reward amount in treasury
+     * @return rewardAllowedForThisPool allowed reward amount to be spent by this pool
+     */
+    function availableReward()
+        public
+        view
+        returns (uint256 rewardInTreasury, uint256 rewardAllowedForThisPool)
+    {
+        rewardInTreasury = rewardToken.balanceOf(rewardTreasury);
+        rewardAllowedForThisPool = rewardToken.allowance(
+            rewardTreasury,
+            address(this)
+        );
     }
 
     /**
@@ -158,7 +188,7 @@ contract Staking is Initializable, OwnableUpgradeable {
                     ((newReward * ACC_REWARD_PRECISION) / lpSupply);
             }
             lastRewardTime = block.timestamp;
-            emit LogUpdatePool(lastRewardTime, lpSupply, accRewardPerShare);
+            emit LogUpdatePool(block.timestamp, lpSupply, accRewardPerShare);
         }
     }
 
@@ -223,10 +253,10 @@ contract Staking is Initializable, OwnableUpgradeable {
         // Interactions
         if (isEarlyWithdrawal(user.lastDepositedAt)) {
             uint256 penaltyAmount = _pendingReward * penaltyRate / 10000;
-            rewardToken.safeTransfer(to, _pendingReward - penaltyAmount);
-            rewardToken.safeTransfer(address(0xdead), penaltyAmount);
+            rewardToken.safeTransferFrom(rewardTreasury, to, _pendingReward - penaltyAmount);
+            rewardToken.safeTransferFrom(rewardTreasury, address(0xdead), _pendingReward);
         } else {
-            rewardToken.safeTransfer(to, _pendingReward);
+            rewardToken.safeTransferFrom(rewardTreasury, to, _pendingReward);
         }
 
         lpToken.safeTransfer(to, amount);
@@ -253,10 +283,10 @@ contract Staking is Initializable, OwnableUpgradeable {
         if (_pendingReward != 0) {
             if (isEarlyWithdrawal(user.lastDepositedAt)) {
                 uint256 penaltyAmount = _pendingReward * penaltyRate / 10000;
-                rewardToken.safeTransfer(to, _pendingReward - penaltyAmount);
-                rewardToken.safeTransfer(address(0xdead), penaltyAmount);
+                rewardToken.safeTransferFrom(rewardTreasury, to, _pendingReward - penaltyAmount);
+                rewardToken.safeTransferFrom(rewardTreasury, address(0xdead), _pendingReward);
             } else {
-                rewardToken.safeTransfer(to, _pendingReward);
+                rewardToken.safeTransferFrom(rewardTreasury, to, _pendingReward);
             }
         }
     }
