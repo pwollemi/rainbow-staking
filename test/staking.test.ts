@@ -13,7 +13,7 @@ import {
   getBigNumber,
   advanceTimeAndBlock,
 } from "../helper/utils";
-import { deployContract, deployProxy } from "../helper/deployer";
+import { deployContract } from "../helper/deployer";
 
 chai.use(solidity);
 const { expect } = chai;
@@ -50,7 +50,7 @@ describe("Staking Pool", () => {
     // );
     rewardToken = rainbow;
     staking = <Staking>(
-      await deployProxy(
+      await deployContract(
         "Staking",
         rewardToken.address,
         rainbow.address,
@@ -78,14 +78,14 @@ describe("Staking Pool", () => {
   describe("initialize", async () => {
     it("Validiation of initilize params", async () => {
       await expect(
-        deployProxy(
+        deployContract(
           "Staking",
           ethers.constants.AddressZero,
           rainbow.address,
         )
       ).to.be.revertedWith("initialize: reward token address cannot be zero");
       await expect(
-        deployProxy(
+        deployContract(
           "Staking",
           rewardToken.address,
           ethers.constants.AddressZero,
