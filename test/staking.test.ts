@@ -52,7 +52,6 @@ describe("Staking Pool", () => {
     staking = <Staking>(
       await deployContract(
         "Staking",
-        rewardToken.address,
         rainbow.address,
       )
     );
@@ -81,32 +80,8 @@ describe("Staking Pool", () => {
         deployContract(
           "Staking",
           ethers.constants.AddressZero,
-          rainbow.address,
         )
-      ).to.be.revertedWith("initialize: reward token address cannot be zero");
-      await expect(
-        deployContract(
-          "Staking",
-          rewardToken.address,
-          ethers.constants.AddressZero,
-        )
-      ).to.be.revertedWith("initialize: LP token address cannot be zero");
-    });
-  });
-
-  describe("Deposit/withdraw reward token", () => {
-    const tokenAmount = getBigNumber(1);
-
-    it("Only owner can do these operation", async () => {
-      await expect(
-        staking.connect(bob).depositReward(tokenAmount)
-      ).to.be.revertedWith("Ownable: caller is not the owner");
-      await staking.depositReward(tokenAmount);
-
-      await expect(
-        staking.connect(bob).withdrawReward(tokenAmount)
-      ).to.be.revertedWith("Ownable: caller is not the owner");
-        await staking.withdrawReward(tokenAmount);
+      ).to.be.revertedWith("initialize: token address cannot be zero");
     });
   });
 
@@ -192,8 +167,7 @@ describe("Staking Pool", () => {
         .to.emit(staking, "LogUpdatePool")
         .withArgs(
           await staking.lastRewardTime(),
-          await rainbow.balanceOf(staking.address),
-          await staking.accRewardPerShare()
+          await rainbow.balanceOf(staking.address)
         );
     });
   });
@@ -210,9 +184,6 @@ describe("Staking Pool", () => {
       const balance1 = await rewardToken.balanceOf(alice.address);
 
       expect(balance1.sub(balance0)).to.be.equal(
-        expectedReward
-      );
-      expect((await staking.userInfo(alice.address)).rewardDebt).to.be.equal(
         expectedReward
       );
       expect(await staking.pendingReward(alice.address)).to.be.equal(0);
@@ -232,9 +203,6 @@ describe("Staking Pool", () => {
 
       expect(balance1.sub(balance0)).to.be.equal(
         expectedReward.mul(9).div(10)
-      );
-      expect((await staking.userInfo(alice.address)).rewardDebt).to.be.equal(
-        expectedReward
       );
       expect(await staking.pendingReward(alice.address)).to.be.equal(0);
     });
@@ -260,8 +228,6 @@ describe("Staking Pool", () => {
 
       // remainging reward should be zero
       expect(await staking.pendingReward(alice.address)).to.be.equal(0);
-      // remaing debt should be zero
-      expect((await staking.userInfo(alice.address)).rewardDebt).to.be.equal(0);
     });
   });
 
