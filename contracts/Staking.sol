@@ -134,7 +134,7 @@ contract Staking is Ownable {
     function getStakeInfo(address _user) external view returns (uint256 share, uint256 stakeAmount) {
         UserInfo memory user = userInfo[_user];
         share = user.share;
-        stakeAmount =  totalShares > 0 ? token.balanceOf(address(this)) * share / totalShares : 0;
+        stakeAmount = roundShareToAmount(share, token.balanceOf(address(this)), totalShares);
     }
 
     /**
@@ -155,7 +155,7 @@ contract Staking is Ownable {
             uint256 newReward = (block.timestamp - lastRewardTime) * rewardPerSecond;
             tokenSupply_ = tokenSupply_ + newReward;
         }
-        pending = tokenSupply_ * user.share / totalShares - user.amount;
+        pending = roundShareToAmount(user.share, tokenSupply_, totalShares) - user.amount;
     }
 
     /**
@@ -163,10 +163,11 @@ contract Staking is Ownable {
      * @dev Updates accRewardPerShare and lastRewardTime.
      */
     function updatePool() public {
-        if (totalShares == 0) return;
         if (block.timestamp > lastRewardTime) {
-            uint256 newReward = (block.timestamp - lastRewardTime) * rewardPerSecond;
-            token.safeTransferFrom(rewardTreasury, address(this), newReward);
+            if (totalShares > 0) {
+                uint256 newReward = (block.timestamp - lastRewardTime) * rewardPerSecond;
+                token.safeTransferFrom(rewardTreasury, address(this), newReward);
+            }
             lastRewardTime = block.timestamp;
             emit LogUpdatePool(block.timestamp, token.balanceOf(address(this)));
         }
@@ -184,7 +185,7 @@ contract Staking is Ownable {
         // Effects
         uint256 share;
         if (totalShares > 0) {
-            share = amount * totalShares / token.balanceOf(address(this));
+            share = roundAmountToShare(amount, token.balanceOf(address(this)), totalShares);
         } else {
             share = amount;
         }
@@ -205,16 +206,17 @@ contract Staking is Ownable {
      * @param to Receiver of the LP tokens and rewards.
      */
     function withdraw(uint256 amount, address to) public {
+        if (totalShares == 0) return;
+
         updatePool();
         UserInfo storage user = userInfo[msg.sender];
-        uint256 _pendingReward = user.share * token.balanceOf(address(this)) / totalShares - user.amount;
+        uint256 _pendingReward = roundShareToAmount(user.share, token.balanceOf(address(this)), totalShares) - user.amount;
         uint256 withdrawAmount = amount + _pendingReward;
 
-        uint256 lpSupply = token.balanceOf(address(this));
-        uint256 shareFromAmount = lpSupply > 0 ? withdrawAmount * totalShares / lpSupply : 0;
+        uint256 shareFromAmount = roundAmountToShare(withdrawAmount, token.balanceOf(address(this)), totalShares);
         if (shareFromAmount > user.share) {
             shareFromAmount = user.share;
-            withdrawAmount = shareFromAmount * token.balanceOf(address(this)) / totalShares;
+            withdrawAmount = roundShareToAmount(shareFromAmount, token.balanceOf(address(this)), totalShares);
         }
 
         // Effects
@@ -241,17 +243,12 @@ contract Staking is Ownable {
      * @param to Receiver of rewards.
      */
     function harvest(address to) public {
+        if (totalShares == 0) return;
+
         updatePool();
         UserInfo storage user = userInfo[msg.sender];
-        uint256 _pendingReward = user.share * token.balanceOf(address(this)) / totalShares - user.amount;
-        uint256 withdrawAmount = _pendingReward;
-
-        uint256 lpSupply = token.balanceOf(address(this));
-        uint256 shareFromAmount = lpSupply > 0 ? withdrawAmount * totalShares / lpSupply : 0;
-        if (shareFromAmount > user.share) {
-            shareFromAmount = user.share;
-            withdrawAmount = shareFromAmount * token.balanceOf(address(this)) / totalShares;
-        }
+        uint256 _pendingReward = roundShareToAmount(user.share, token.balanceOf(address(this)), totalShares) - user.amount;
+        uint256 shareFromAmount = roundAmountToShare(_pendingReward, token.balanceOf(address(this)), totalShares);
 
         // Effects
         user.share = user.share - shareFromAmount;
@@ -260,13 +257,13 @@ contract Staking is Ownable {
         emit Harvest(msg.sender, _pendingReward);
 
         // Interactions
-        if (withdrawAmount != 0) {
+        if (_pendingReward != 0) {
             if (isEarlyWithdrawal(user.lastDepositedAt)) {
                 uint256 penaltyAmount = _pendingReward * penaltyRate / 10000;
-                token.safeTransfer(to, withdrawAmount - penaltyAmount);
-                token.safeTransfer(address(0xdead), _pendingReward);
+                token.safeTransfer(to, _pendingReward - penaltyAmount);
+                token.safeTransfer(address(0xdead), penaltyAmount);
             } else {
-                token.safeTransfer(to, withdrawAmount);
+                token.safeTransfer(to, _pendingReward);
             }
         }
     }
@@ -299,5 +296,25 @@ contract Staking is Ownable {
 
     function renounceOwnership() public override onlyOwner {
         revert();
+    }
+
+    function roundAmountToShare(uint256 amount_, uint256 totalTokens_, uint256 totalShares_) internal view returns (uint256 share_) {
+        if (totalTokens_ == 0) {
+            return 0;
+        }
+        share_ = amount_ * totalShares_ / totalTokens_;
+        if (share_ > totalShares_) {
+            share_ = totalShares_;
+        }
+    }
+
+    function roundShareToAmount(uint256 share_, uint256 totalTokens_, uint256 totalShares_) internal view returns (uint256 amount_) {
+        if (totalShares_ == 0) {
+            return 0;
+        }
+        amount_ = share_ * totalTokens_ / totalShares_;
+        if (amount_ > totalTokens_) {
+            amount_ = totalTokens_;
+        }
     }
 }

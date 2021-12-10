@@ -150,9 +150,11 @@ describe("Staking Pool", () => {
     });
 
     it("PendingRward should equal ExpectedReward", async () => {
+      console.log((await rainbow.balanceOf(staking.address)).toString());
       await staking.deposit(getBigNumber(1, 9), alice.address);
       await advanceTime(86400);
       await mineBlock();
+      console.log((await rainbow.balanceOf(staking.address)).toString());
       const expectedReward = rewardPerSecond.mul(86400);
       expect(await staking.pendingReward(alice.address)).to.be.equal(
         expectedReward
