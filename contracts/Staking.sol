@@ -6,6 +6,7 @@ pragma abicoder v2;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "./StakingRegistry.sol";
 
 /// @title Staking Contract
 /// @notice You can use this contract for staking LP tokens
@@ -51,10 +52,14 @@ contract Staking is Ownable {
     /// @notice Penalty rate with 2 dp (e.g. 1000 = 10%)
     uint256 public penaltyRate;
 
+    /// @notice Registry for Staking Contracts and Levels
+    StakingRegistry public registry;
+
     event Deposit(address indexed user, uint256 amount, uint256 share, address indexed to);
     event Withdraw(address indexed user, uint256 amount, uint256 share, address indexed to);
     event EmergencyWithdraw(address indexed user, uint256 amount, uint256 share, address indexed to);
     event Harvest(address indexed user, uint256 amount);
+    event Migrate(address indexed user, address indexed target);
 
     event LogUpdatePool(uint256 lastRewardTime, uint256 lpSupply);
     event LogRewardPerSecond(uint256 rewardPerSecond);
@@ -316,5 +321,43 @@ contract Staking is Ownable {
         if (amount_ > totalTokens_) {
             amount_ = totalTokens_;
         }
+    }
+
+    /********************** Migration ********************/
+
+    /**
+     * @notice Set Registry contract address.
+     * @param _registry address.
+     */
+    function setRegistry(StakingRegistry _registry) external onlyOwner {
+        registry = _registry;
+    }
+
+    /**
+     * @notice Migrate to another pool.
+     * @param target pool address.
+     */
+    function migrate(address target) external {
+        if (totalShares == 0) return;
+
+        require(address(registry) != address(0), "Set Registry first!");
+        require(registry.levels(address(this)) > 0, "Register this pool first!");
+        require(registry.levels(target) > 0, "Register this pool first!");
+        require(registry.levels(address(this)) < registry.levels(target), "Can't migrate to low pools");
+
+        updatePool();
+        UserInfo storage user = userInfo[msg.sender];
+        uint256 amount = roundShareToAmount(user.share, token.balanceOf(address(this)), totalShares);
+
+        // Effects
+        totalShares = totalShares - user.share;
+        user.share = 0;
+        user.amount = 0;
+
+        emit Migrate(msg.sender, target);
+
+        // Interactions
+        token.approve(target, amount);
+        Staking(target).deposit(amount, msg.sender);
     }
 }
