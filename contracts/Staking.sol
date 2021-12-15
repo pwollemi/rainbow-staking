@@ -37,6 +37,9 @@ contract Staking is Ownable {
     /// @notice Total shares amount
     uint256 public totalShares;
 
+    /// @notice Total input amount
+    uint256 public totalInput;
+
     /// @notice Last time that the reward is calculated.
     uint256 public lastRewardTime;
 
@@ -195,13 +198,6 @@ contract Staking is Ownable {
         if (block.timestamp > lastRewardTime) {
             if (totalShares > 0) {
                 uint256 newReward = (block.timestamp - lastRewardTime) * rewardPerSecond;
-
-                if (token.balanceOf(address(this)) >= stakeCap) {
-                    newReward = 0;
-                } else if (token.balanceOf(address(this)) + newReward >= stakeCap) {
-                    newReward = stakeCap - token.balanceOf(address(this));
-                }
-
                 token.safeTransferFrom(rewardTreasury, address(this), newReward);
             }
             lastRewardTime = block.timestamp;
@@ -215,10 +211,9 @@ contract Staking is Ownable {
      * @param to The receiver of `amount` deposit benefit.
      */
     function deposit(uint256 amount, address to) public {
+        require(totalInput + amount <= stakeCap, "Reached to cap");
+
         updatePool();
-
-        require(token.balanceOf(address(this)) + amount <= stakeCap, "Reached to cap");
-
         UserInfo storage user = userInfo[to];
 
         // Effects
@@ -233,6 +228,7 @@ contract Staking is Ownable {
         user.share = user.share + share;
         user.lastDepositedAt = block.timestamp;
         user.amount = user.amount + amount;
+        totalInput = totalInput + amount;
 
         emit Deposit(msg.sender, amount, share, to);
 
@@ -262,6 +258,7 @@ contract Staking is Ownable {
         user.share = user.share - shareFromAmount;
         totalShares = totalShares - shareFromAmount;
         user.amount = user.amount - amount;
+        totalInput = totalInput - amount;
 
         emit Withdraw(msg.sender, amount, shareFromAmount, to);
         emit Harvest(msg.sender, _pendingReward);
@@ -318,6 +315,7 @@ contract Staking is Ownable {
         totalShares = totalShares - share;
         user.share = 0;
         user.amount = 0;
+        totalInput = totalInput - amount;
 
         emit EmergencyWithdraw(msg.sender, amount, share, to);
 
@@ -385,6 +383,7 @@ contract Staking is Ownable {
 
         // Effects
         totalShares = totalShares - user.share;
+        totalInput = totalInput - user.amount;
         user.share = 0;
         user.amount = 0;
 
