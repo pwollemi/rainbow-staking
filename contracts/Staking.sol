@@ -52,6 +52,9 @@ contract Staking is Ownable {
     /// @notice Penalty rate with 2 dp (e.g. 1000 = 10%)
     uint256 public penaltyRate;
 
+    /// @notice Cap amount of total staked balance 
+    uint256 public stakeCap;
+
     /// @notice Registry for Staking Contracts and Levels
     StakingRegistry public registry;
 
@@ -65,6 +68,7 @@ contract Staking is Ownable {
     event LogRewardPerSecond(uint256 rewardPerSecond);
     event LogPenaltyParams(uint256 earlyWithdrawal, uint256 penaltyRate);
     event LogRewardTreasury(address indexed wallet);
+    event LogStakeCap(uint256 stakeCap);
 
     /**
      * @param _token The LP token contract address.
@@ -79,6 +83,7 @@ contract Staking is Ownable {
 
         earlyWithdrawal = 30 days;
         penaltyRate = 0;
+        stakeCap = type(uint256).max;
     }
 
     /**
@@ -113,6 +118,15 @@ contract Staking is Ownable {
     }
 
     /**
+     * @notice set cap amount
+     * @param _stakeCap of this pool
+     */
+    function setStakeCap(uint256 _stakeCap) external onlyOwner {
+        stakeCap = _stakeCap;
+        emit LogStakeCap(_stakeCap);
+    }
+
+    /**
      * @notice return available reward amount
      * @return rewardInTreasury reward amount in treasury
      * @return rewardAllowedForThisPool allowed reward amount to be spent by this pool
@@ -133,13 +147,23 @@ contract Staking is Ownable {
      * @notice Returns the stake info of a specifc user.
      * @dev Calculates stakeAmount from the share
      * @param _user Address of the user
-     * @return share of the user
      * @return stakeAmount of the user
      */
-    function getStakeInfo(address _user) external view returns (uint256 share, uint256 stakeAmount) {
+    function getTotalBalance(address _user) external view returns (uint256 stakeAmount) {
         UserInfo memory user = userInfo[_user];
-        share = user.share;
-        stakeAmount = roundShareToAmount(share, token.balanceOf(address(this)), totalShares);
+        stakeAmount = roundShareToAmount(user.share, token.balanceOf(address(this)), totalShares);
+    }
+
+    /**
+     * @notice Returns penalty percentage 10000 is 100%
+     * @param _user Address of the user
+     * @return rate of penalty
+     */
+    function getPenaltyRate(address _user) external view returns (uint256 rate) {
+        UserInfo memory user = userInfo[_user];
+        if (isEarlyWithdrawal(user.lastDepositedAt)) {
+            rate = penaltyRate;
+        }
     }
 
     /**
@@ -171,6 +195,13 @@ contract Staking is Ownable {
         if (block.timestamp > lastRewardTime) {
             if (totalShares > 0) {
                 uint256 newReward = (block.timestamp - lastRewardTime) * rewardPerSecond;
+
+                if (token.balanceOf(address(this)) >= stakeCap) {
+                    newReward = 0;
+                } else if (token.balanceOf(address(this)) + newReward >= stakeCap) {
+                    newReward = stakeCap - token.balanceOf(address(this));
+                }
+
                 token.safeTransferFrom(rewardTreasury, address(this), newReward);
             }
             lastRewardTime = block.timestamp;
@@ -185,6 +216,9 @@ contract Staking is Ownable {
      */
     function deposit(uint256 amount, address to) public {
         updatePool();
+
+        require(token.balanceOf(address(this)) + amount <= stakeCap, "Reached to cap");
+
         UserInfo storage user = userInfo[to];
 
         // Effects
@@ -234,9 +268,9 @@ contract Staking is Ownable {
 
         // Interactions
         if (isEarlyWithdrawal(user.lastDepositedAt)) {
-            uint256 penaltyAmount = _pendingReward * penaltyRate / 10000;
+            uint256 penaltyAmount = withdrawAmount * penaltyRate / 10000;
             token.safeTransfer(to, withdrawAmount - penaltyAmount);
-            token.safeTransfer(address(0xdead), _pendingReward);
+            token.safeTransfer(owner(), penaltyAmount);
         } else {
             token.safeTransfer(to, withdrawAmount);
         }
@@ -266,7 +300,7 @@ contract Staking is Ownable {
             if (isEarlyWithdrawal(user.lastDepositedAt)) {
                 uint256 penaltyAmount = _pendingReward * penaltyRate / 10000;
                 token.safeTransfer(to, _pendingReward - penaltyAmount);
-                token.safeTransfer(address(0xdead), penaltyAmount);
+                token.safeTransfer(owner(), penaltyAmount);
             } else {
                 token.safeTransfer(to, _pendingReward);
             }
@@ -303,7 +337,7 @@ contract Staking is Ownable {
         revert();
     }
 
-    function roundAmountToShare(uint256 amount_, uint256 totalTokens_, uint256 totalShares_) internal view returns (uint256 share_) {
+    function roundAmountToShare(uint256 amount_, uint256 totalTokens_, uint256 totalShares_) internal pure returns (uint256 share_) {
         if (totalTokens_ == 0) {
             return 0;
         }
@@ -313,7 +347,7 @@ contract Staking is Ownable {
         }
     }
 
-    function roundShareToAmount(uint256 share_, uint256 totalTokens_, uint256 totalShares_) internal view returns (uint256 amount_) {
+    function roundShareToAmount(uint256 share_, uint256 totalTokens_, uint256 totalShares_) internal pure returns (uint256 amount_) {
         if (totalShares_ == 0) {
             return 0;
         }
