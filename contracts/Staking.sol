@@ -194,7 +194,7 @@ contract Staking is Ownable {
      * @notice Update reward variables.
      * @dev Updates accRewardPerShare and lastRewardTime.
      */
-    function updatePool() public {
+    function updatePool() public notContract {
         if (block.timestamp > lastRewardTime) {
             if (totalShares > 0) {
                 uint256 newReward = (block.timestamp - lastRewardTime) * rewardPerSecond;
@@ -210,7 +210,7 @@ contract Staking is Ownable {
      * @param amount LP token amount to deposit.
      * @param to The receiver of `amount` deposit benefit.
      */
-    function deposit(uint256 amount, address to) public {
+    function deposit(uint256 amount, address to) public notContract {
         require(totalInput + amount <= stakeCap, "Reached to cap");
 
         updatePool();
@@ -240,7 +240,7 @@ contract Staking is Ownable {
      * @param amount LP token amount to withdraw.
      * @param to Receiver of the LP tokens and rewards.
      */
-    function withdraw(uint256 amount, address to) public {
+    function withdraw(uint256 amount, address to) public notContract {
         if (totalShares == 0) return;
 
         updatePool();
@@ -278,7 +278,7 @@ contract Staking is Ownable {
      * @dev Here comes the formula to calculate reward token amount
      * @param to Receiver of rewards.
      */
-    function harvest(address to) public {
+    function harvest(address to) public notContract {
         if (totalShares == 0) return;
 
         updatePool();
@@ -308,7 +308,7 @@ contract Staking is Ownable {
      * @notice Withdraw without caring about rewards. EMERGENCY ONLY.
      * @param to Receiver of the LP tokens.
      */
-    function emergencyWithdraw(address to) public {
+    function emergencyWithdraw(address to) public notContract {
         UserInfo storage user = userInfo[msg.sender];
         uint256 share = user.share;
         uint256 amount = user.amount;
@@ -369,7 +369,7 @@ contract Staking is Ownable {
      * @notice Migrate to another pool.
      * @param target pool address.
      */
-    function migrate(address target) external {
+    function migrate(address target) external notContract {
         if (totalShares == 0) return;
 
         require(address(registry) != address(0), "Set Registry first!");
@@ -392,5 +392,27 @@ contract Staking is Ownable {
         // Interactions
         token.approve(target, amount);
         Staking(target).deposit(amount, msg.sender);
+    }
+
+    
+    /**
+     * @notice Checks if address is a contract
+     * @dev It prevents contract from being targetted
+     */
+    function _isContract(address addr) internal view returns (bool) {
+        uint256 size;
+        assembly {
+            size := extcodesize(addr)
+        }
+        return size > 0;
+    }
+
+    /**
+     * @notice Checks if the msg.sender is a contract or a proxy
+     */
+    modifier notContract() {
+        require(!_isContract(msg.sender), "contract not allowed");
+        require(msg.sender == tx.origin, "proxy contract not allowed");
+        _;
     }
 }
