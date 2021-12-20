@@ -13,7 +13,7 @@ import {
   getBigNumber,
   advanceTimeAndBlock,
 } from "../helper/utils";
-import { deployContract } from "../helper/deployer";
+import { deployContract, deployProxy } from "../helper/deployer";
 
 chai.use(solidity);
 const { expect } = chai;
@@ -50,7 +50,7 @@ describe("Staking Pool", () => {
     // );
     rewardToken = rainbow;
     staking = <Staking>(
-      await deployContract(
+      await deployProxy(
         "Staking",
         rainbow.address,
       )
@@ -77,7 +77,7 @@ describe("Staking Pool", () => {
   describe("initialize", async () => {
     it("Validiation of initilize params", async () => {
       await expect(
-        deployContract(
+        deployProxy(
           "Staking",
           ethers.constants.AddressZero,
         )

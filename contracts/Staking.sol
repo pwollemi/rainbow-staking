@@ -3,18 +3,19 @@
 pragma solidity 0.8.0;
 pragma abicoder v2;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/math/SafeCast.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/math/SafeCastUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/token/ERC20/utils/SafeERC20Upgradeable.sol";
 import "./StakingRegistry.sol";
 
 /// @title Staking Contract
 /// @notice You can use this contract for staking LP tokens
 /// @dev All function calls are currently implemented without side effects
-contract Staking is Ownable {
-    using SafeERC20 for IERC20;
-    using SafeCast for int256;
-    using SafeCast for uint256;
+contract Staking is Initializable, OwnableUpgradeable {
+    using SafeERC20Upgradeable for IERC20Upgradeable;
+    using SafeCastUpgradeable for int256;
+    using SafeCastUpgradeable for uint256;
 
     /// @notice Info of each user.
     /// `share` user's share of the staking pool
@@ -29,7 +30,7 @@ contract Staking is Ownable {
     uint256 private constant ACC_REWARD_PRECISION = 1e12;
 
     /// @notice Address of Rainbow token contract.
-    IERC20 public token;
+    IERC20Upgradeable public token;
 
     /// @notice Amount of reward token allocated per second.
     uint256 public rewardPerSecond;
@@ -76,10 +77,12 @@ contract Staking is Ownable {
     /**
      * @param _token The LP token contract address.
      */
-    constructor(
-        IERC20 _token
-    ) {
+    function initialize(
+        IERC20Upgradeable _token
+    ) external initializer {
         require(address(_token) != address(0), "initialize: token address cannot be zero");
+
+        __Ownable_init();
 
         token = _token;
         lastRewardTime = block.timestamp;
